@@ -1,4 +1,4 @@
-# Vigía
+# Vigia
 
 Daemon local para Linux que modela el rendimiento normal de un sistema
 (su *baseline*), detecta cuándo se degrada y señala la causa probable.
