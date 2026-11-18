@@ -89,7 +89,8 @@ posible (usa como 2.5 MB de RAM).
 
 ```sh
 make
-make demo   # corre la prueba (como 5 minutos, sin usar la computadora)
+make demo
+# corre la prueba (como 5 minutos sin usar la computadora)
 ```
 
 Para la gráfica se necesita Python con `matplotlib`.
