@@ -1,126 +1,109 @@
-# Vigia
+# Vigía
 
-Daemon local para Linux que modela el rendimiento normal de un sistema
-(su *baseline*), detecta cuándo se degrada y señala la causa probable.
-No usa la red en ningún momento.
+Proyecto final de Modelado y Simulación.
 
-Proyecto de la materia **Modelado y Simulación**. Estado: **avance (fase 0)**.
+- **Alumno:** Cristian López García
+- **Carrera:** Tecnologías para la Información en Ciencias
+- **Materia:** Modelado y Simulación
+- **Ciclo:** 2027-1
+
+## ¿Por qué decidí hacer este proyecto?
+
+Quería hacer un proyecto con bases que realmente entendiera y que fuera
+posible terminar.
+
+También quería monitorear el rendimiento de mi computadora y averiguar por
+qué a veces funciona más lento o más rápido. Y si algún día se mete un
+programa malicioso que esté usando recursos a escondidas, poder detectarlo
+a tiempo.
+
+## ¿Qué es Vigía?
+
+Es un programa que corre en segundo plano en Linux (un daemon). Primero
+aprende cómo se comporta la computadora cuando está normal, y después avisa
+cuando algo se sale de lo normal y dice qué fue.
+
+## ¿Qué mide?
+
+- Temperatura del CPU
+- Uso de la RAM
+- Uso del CPU
+- Presión del CPU, la memoria y el disco (PSI): cuánto tiempo se quedan
+  esperando los programas por esos recursos
+- Latencia: cuánto tarda el sistema en responder
+
+Con estas mediciones saco un promedio de cómo está el sistema cuando todo
+va bien. A eso le llamo la **baseline**.
+
+## La matemática
+
+**1. Calibración.** Con la computadora en reposo, saco el promedio $\mu$ y la
+desviación estándar $\sigma$ de cada medición.
+
+**2. Qué tan lejos está de lo normal.**
+
+$$z = \frac{x - \mu}{\sigma}$$
+
+Si $z = 0$, la medición está igual que siempre. Si $z = 3$, está 3
+desviaciones estándar arriba de lo normal.
+
+**3. Suavizado.** Las mediciones brincan mucho, así que mezclo la medición
+nueva con las anteriores para que un pico aislado no cuente:
+
+$$s_t = 0.3 \cdot z_t + 0.7 \cdot s_{t-1}$$
+
+**4. Índice de degradación.** Me quedo con la medición que esté peor. Esa
+es la causa probable.
+
+$$D = \max(0,\ s_1,\ s_2,\ \dots,\ s_n)$$
+
+El 0 está para que el índice nunca sea negativo.
+
+**5. Alerta.** Si $D \geq 2$ durante 5 mediciones seguidas, avisa. Para
+quitar la alerta, $D$ tiene que estar abajo de 2 otras 5 mediciones seguidas.
+
+Un detalle: con la computadora en reposo, $\sigma$ sale casi cero y cualquier
+cambio pequeño daría una $z$ enorme. Por eso le puse un valor mínimo a
+$\sigma$ (por ejemplo 2 % para el CPU y 2 °C para la temperatura).
+
+## Prueba
 
 ![Gráfica del experimento de demostración](docs/demo.png)
 
-## Qué demuestra la gráfica
+Dejé la computadora en reposo para calibrar y luego le metí dos cargas a
+propósito:
 
-Es un experimento controlado: se calibra la baseline con el sistema en
-reposo, se inyectan dos cargas conocidas y se observa qué detecta Vigía.
+- **CPU al 100 % por 45 segundos:** Vigía avisó 5 segundos después y dijo
+  que la causa era el CPU.
+- **Unos 8 GB de RAM ocupados por 45 segundos:** avisó 6 segundos después y
+  dijo que la causa era la RAM.
 
-| Carga inyectada | Inicio | Alerta de Vigía | Causa atribuida | Fin de la alerta |
-|---|---|---|---|---|
-| CPU (16 hilos, 45 s) | 104 s | 109 s (+5 s) | uso de CPU | 23 s después de retirar la carga |
-| Memoria (≈8 GB, 45 s) | 193 s | 199 s (+6 s) | uso de RAM | 11 s después de retirar la carga |
+No hubo alertas falsas. La alerta del CPU tardó más en quitarse porque el
+procesador se quedó caliente un rato después de quitar la carga.
 
-- Las dos cargas se detectaron y se atribuyeron a la causa correcta.
-- No hubo alertas fuera de los periodos de carga.
-- La alerta de CPU tarda más en apagarse porque la temperatura sigue alta
-  un rato después de quitar la carga (inercia térmica); el índice lo refleja.
+## Compilación y arranque
 
-Los datos de esta corrida están en `data/demo.csv`.
-
-## El modelo
-
-Para cada métrica `x`, durante la calibración se calculan su media `μ` y
-su desviación estándar `σ`. Después, en cada muestra:
-
-| Paso | Fórmula | Para qué |
-|---|---|---|
-| Desviación normalizada | `z = (x − μ) / σ` | Qué tan lejos de lo normal está la métrica |
-| Suavizado (EWMA) | `s_t = α·z_t + (1−α)·s_{t−1}`, `α = 0.3` | Ignorar picos aislados |
-| Índice de degradación | `D = max(s_i, 0)` | Un solo número: la peor métrica en ese momento |
-| Causa probable | la métrica `i` con mayor `s_i` | Explicar el porqué |
-| Alerta | `D ≥ 2` durante 5 muestras seguidas | Avisar solo si la desviación se sostiene |
-
-Dos detalles del modelo:
-
-- **Piso de σ.** Un sistema en reposo es tan estable que `σ` puede ser casi
-  cero y cualquier cambio mínimo daría una `z` enorme. Cada métrica tiene un
-  `σ` mínimo (por ejemplo, 2 puntos porcentuales para CPU y 2 °C para
-  temperatura).
-- **Histéresis.** La alerta se apaga con la misma regla con la que se
-  enciende (5 muestras seguidas bajo el umbral), para que no parpadee.
-
-## Métricas actuales
-
-| Métrica | Fuente |
-|---|---|
-| Uso de CPU | `/proc/stat` |
-| Uso de RAM y swap | `/proc/meminfo` |
-| Temperatura de CPU | `/sys/class/hwmon` |
-| Presión de CPU, memoria y E/S (PSI) | `/proc/pressure/*` |
-| Latencia de respuesta (retraso al despertar de un sleep de 10 ms) | medición propia |
-
-Si una fuente no existe en el equipo, esa métrica se omite y el daemon
-sigue funcionando con las demás.
-
-## Uso
-
-Requisitos: `gcc`, `make` y, para la gráfica, Python con `matplotlib`.
+El daemon está hecho en C y se compila con optimizaciones para el
+procesador de la computadora donde va a correr, para que sea lo más ligero
+posible (usa como 2.5 MB de RAM).
 
 ```sh
-make                # compila build/vigiad y build/loadgen
-make demo           # corre el experimento (~5 min) y genera docs/demo.png
+make
+make demo   # corre la prueba (como 5 minutos, sin usar la computadora)
 ```
 
-Durante `make demo` hay que dejar el equipo en reposo. Si `matplotlib` no
-está instalado en el sistema:
+Para la gráfica se necesita Python con `matplotlib`.
+
+La idea es que Vigía arranque solo al prender la computadora como un
+servicio de systemd:
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install matplotlib
+sudo systemctl enable --now vigiad
 ```
 
-Ejecutar el daemon a mano:
+## Lo que falta
 
-```sh
-./build/vigiad -i 5000 -c 720 -o datos.csv
-```
-
-| Opción | Significado | Valor por defecto |
-|---|---|---|
-| `-i` | Intervalo de muestreo en milisegundos | 5000 |
-| `-c` | Muestras usadas para calibrar la baseline | 720 (una hora) |
-| `-n` | Detenerse tras este número de muestras | 0 (sin límite) |
-| `-o` | Archivo CSV de salida | salida estándar |
-
-## Estructura
-
-| Ruta | Contenido |
-|---|---|
-| `src/collect.c` | Colectores de métricas |
-| `src/baseline.c` | El modelo: baseline, z, EWMA, índice, alerta |
-| `src/vigiad.c` | Ciclo principal del daemon |
-| `tools/loadgen.c` | Generador de carga para el experimento |
-| `scripts/demo.sh` | Experimento controlado |
-| `scripts/plot.py` | Gráfica a partir del CSV |
-
-## Diseño
-
-- **C11**, sin dependencias en esta fase. El daemon usa unos 2.5 MB de RAM,
-  un solo hilo y no reserva memoria dinámica.
-- Compilado con `-march=native` y opciones de endurecimiento (PIE, RELRO,
-  protector de pila, `_FORTIFY_SOURCE=3`), con `-Wall -Wextra -Werror`.
-- Solo lee archivos de `/proc` y `/sys`. No abre sockets.
-
-## Pendiente
-
-Esta fase todavía **no cifra los datos**: el CSV se escribe en claro.
-
-| Fase | Contenido |
-|---|---|
-| 1 | Historial cifrado con libsodium (el daemon cifra con clave pública; solo el usuario descifra con su contraseña). Herramienta `vigia` para leer el reporte. Métricas por proceso, disco, throttling y tiempo de arranque. |
-| 2 | Reglas de atribución más finas (qué proceso o servicio causó el cambio). Notificación semanal y alerta inmediata. Servicio de systemd aislado (sin red, sin privilegios). GPU opcional. |
-
-Límites conocidos: el experimento dura minutos; falta validar el modelo con
-datos de varios días de uso real, donde la baseline debe distinguir el uso
-normal de una degradación.
-
-## Licencia
-
-MIT. Ver [LICENSE](LICENSE).
+- Hacer el servicio de systemd
+- Cifrar los datos (por ahora se guardan sin cifrar)
+- Probarlo varios días con uso normal, no solo unos minutos
+- Que diga qué programa exactamente causó el problema
