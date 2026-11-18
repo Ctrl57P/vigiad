@@ -1,4 +1,4 @@
-# Vigía
+# Vigia
 
 Proyecto final de Modelado y Simulación.
 
